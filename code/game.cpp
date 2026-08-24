@@ -271,7 +271,7 @@ const string EMPTY_CELL = "  ";
 // ======================================================
 // Food, Snake, GameBoard, and Game classes
 // ======================================================
-const int NUM_PLAYERS = 1;
+const int NUM_PLAYERS = 2;
 
 class Snake;
 
