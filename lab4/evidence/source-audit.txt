@@ -1,0 +1,4 @@
+PASS extracted tick is identical after pointer/state substitutions
+PASS every Part B line citation exists in the pinned base
+PASS all six report sections are filled
+Base: d4db6117edc19610472ad3df2e9cdeba840146e1

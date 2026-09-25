@@ -1,0 +1,6 @@
+KILLED missing-score (compiled successfully; behavioral assertion failed)
+KILLED double-score (compiled successfully; behavioral assertion failed)
+KILLED missing-growth (compiled successfully; behavioral assertion failed)
+KILLED missing-game-over (compiled successfully; behavioral assertion failed)
+KILLED missing-delay-clamp (compiled successfully; behavioral assertion failed)
+KILLED missing-high-score (compiled successfully; behavioral assertion failed)

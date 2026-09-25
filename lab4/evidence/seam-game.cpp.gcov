@@ -1,0 +1,1700 @@
+        -:    0:Source:<repo>/code/game.cpp
+        -:    0:Graph:tests.gcno
+        -:    0:Data:tests.gcda
+        -:    0:Runs:1
+        -:    0:Programs:1
+        -:    1:// Simple Snake Game - Cross-Platform Terminal Version (Improved rendering: no flicker)
+        -:    2:// Auto-adapts graphics for Windows (ASCII) or Linux/macOS (Emoji)
+        -:    3:// Compile: g++ -std=c++17 snake.cpp -o snake
+        -:    4:
+        -:    5:#include <iostream>
+        -:    6:#include <cstdlib>
+        -:    7:#include <ctime>
+        -:    8:#include <deque>
+        -:    9:#include <vector>
+        -:   10:#include <string>
+        -:   11:#include <fstream>
+        -:   12:#include <sstream>
+        -:   13:
+        -:   14:#ifdef _WIN32
+        -:   15:    #include <conio.h>
+        -:   16:    #include <windows.h>
+        -:   17:
+        -:   18:    #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        -:   19:    #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+        -:   20:    #endif
+        -:   21:#else
+        -:   22:    // POSIX
+        -:   23:    #include <termios.h>
+        -:   24:    #include <unistd.h>
+        -:   25:    #include <sys/ioctl.h>
+        -:   26:    #include <sys/select.h>
+        -:   27:#endif
+        -:   28:
+        -:   29:using namespace std;
+        -:   30:
+        -:   31:// ANSI colors
+        -:   32:#define RED    "\033[31m"
+        -:   33:#define GREEN  "\033[32m"
+        -:   34:#define YELLOW "\033[33m"
+        -:   35:#define CYAN   "\033[36m"
+        -:   36:#define RESET  "\033[0m"
+        -:   37:
+        -:   38:// ======================================================
+        -:   39:// Cross-platform Terminal abstraction
+        -:   40:// ======================================================
+        -:   41:class Terminal {
+        -:   42:private:
+        -:   43:#ifdef _WIN32
+        -:   44:    HANDLE hStdin;
+        -:   45:    HANDLE hStdout;
+        -:   46:    CONSOLE_CURSOR_INFO originalCursorInfo;
+        -:   47:    bool cursorInfoSaved = false;
+        -:   48:    deque<char> pendingChars;
+        -:   49:#else
+        -:   50:    struct termios original;
+        -:   51:#endif
+        -:   52:
+        -:   53:public:
+function _ZN8TerminalC1Ev called 0 returned 0% blocks executed 0%
+    #####:   54:    Terminal() {
+call    0 never executed
+call    1 never executed
+        -:   55:#ifdef _WIN32
+    #####:   56:        hStdin = GetStdHandle(STD_INPUT_HANDLE);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:   57:        hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:   58:
+        -:   59:        CONSOLE_CURSOR_INFO cinfo;
+    #####:   60:        if (GetConsoleCursorInfo(hStdout, &cinfo)) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:   61:            originalCursorInfo = cinfo;
+    #####:   62:            cursorInfoSaved = true;
+        -:   63:        }
+        -:   64:
+    #####:   65:        DWORD mode = 0;
+    #####:   66:        if (GetConsoleMode(hStdout, &mode)) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:   67:            SetConsoleMode(hStdout, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:   68:        }
+        -:   69:#else
+        -:   70:        tcgetattr(STDIN_FILENO, &original);
+        -:   71:        struct termios raw = original;
+        -:   72:        raw.c_lflag &= ~(ICANON | ECHO);
+        -:   73:        raw.c_cc[VMIN] = 0;
+        -:   74:        raw.c_cc[VTIME] = 0;
+        -:   75:        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        -:   76:#endif
+    #####:   77:    }
+        -:   78:
+function _ZN8TerminalD1Ev called 0 returned 0% blocks executed 0%
+    #####:   79:    ~Terminal() {
+call    0 never executed
+        -:   80:#ifdef _WIN32
+    #####:   81:        if (cursorInfoSaved) {
+branch  0 never executed
+branch  1 never executed
+    #####:   82:            SetConsoleCursorInfo(hStdout, &originalCursorInfo);
+call    0 never executed
+        -:   83:        }
+        -:   84:#else
+        -:   85:        tcsetattr(STDIN_FILENO, TCSAFLUSH, &original);
+        -:   86:        showCursor();
+        -:   87:#endif
+    #####:   88:    }
+        -:   89:
+function _ZN8Terminal10hideCursorEv called 0 returned 0% blocks executed 0%
+    #####:   90:    void hideCursor() {
+        -:   91:#ifdef _WIN32
+        -:   92:        CONSOLE_CURSOR_INFO cci;
+    #####:   93:        if (GetConsoleCursorInfo(hStdout, &cci)) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:   94:            cci.bVisible = FALSE;
+    #####:   95:            SetConsoleCursorInfo(hStdout, &cci);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:   96:        }
+        -:   97:#else
+        -:   98:        cout << "\033[?25l" << flush;
+        -:   99:#endif
+    #####:  100:    }
+        -:  101:
+function _ZN8Terminal10showCursorEv called 0 returned 0% blocks executed 0%
+    #####:  102:    void showCursor() {
+        -:  103:#ifdef _WIN32
+        -:  104:        CONSOLE_CURSOR_INFO cci;
+    #####:  105:        if (GetConsoleCursorInfo(hStdout, &cci)) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  106:            cci.bVisible = TRUE;
+    #####:  107:            SetConsoleCursorInfo(hStdout, &cci);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  108:        }
+        -:  109:#else
+        -:  110:        cout << "\033[?25h" << flush;
+        -:  111:#endif
+    #####:  112:    }
+        -:  113:
+function _ZN8Terminal11clearScreenEv called 0 returned 0% blocks executed 0%
+    #####:  114:    void clearScreen() {
+        -:  115:#ifdef _WIN32
+        -:  116:        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        -:  117:        DWORD cellCount;
+        -:  118:        DWORD count;
+    #####:  119:        COORD homeCoords = {0, 0};
+        -:  120:
+    #####:  121:        if (!GetConsoleScreenBufferInfo(hStdout, &csbi)) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  122:            system("cls");
+call    0 never executed
+    #####:  123:            return;
+        -:  124:        }
+        -:  125:
+    #####:  126:        cellCount = csbi.dwSize.X * csbi.dwSize.Y;
+    #####:  127:        FillConsoleOutputCharacter(hStdout, ' ', cellCount, homeCoords, &count);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  128:        FillConsoleOutputAttribute(hStdout, csbi.wAttributes, cellCount, homeCoords, &count);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  129:        SetConsoleCursorPosition(hStdout, homeCoords);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  130:#else
+        -:  131:        cout << "\033[2J\033[H" << flush;
+        -:  132:#endif
+        -:  133:    }
+        -:  134:
+function _ZN8Terminal10moveCursorEii called 0 returned 0% blocks executed 0%
+    #####:  135:    void moveCursor(int x, int y) {
+        -:  136:#ifdef _WIN32
+        -:  137:        COORD pos;
+    #####:  138:        pos.X = (SHORT)(max(0, x - 1));
+call    0 never executed
+    #####:  139:        pos.Y = (SHORT)(max(0, y - 1));
+call    0 never executed
+    #####:  140:        SetConsoleCursorPosition(hStdout, pos);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  141:#else
+        -:  142:        cout << "\033[" << y << ";" << x << "H" << flush;
+        -:  143:#endif
+    #####:  144:    }
+        -:  145:
+function _ZN8Terminal5kbhitEv called 0 returned 0% blocks executed 0%
+    #####:  146:    bool kbhit() {
+        -:  147:#ifdef _WIN32
+    #####:  148:        if (!pendingChars.empty()) return true;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  149:        return _kbhit() != 0;
+call    0 never executed
+        -:  150:#else
+        -:  151:        struct timeval tv = {0, 0};
+        -:  152:        fd_set readfds;
+        -:  153:        FD_ZERO(&readfds);
+        -:  154:        FD_SET(STDIN_FILENO, &readfds);
+        -:  155:        return select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv) == 1;
+        -:  156:#endif
+        -:  157:    }
+        -:  158:
+function _ZN8Terminal5getchEv called 0 returned 0% blocks executed 0%
+    #####:  159:    char getch() {
+        -:  160:#ifdef _WIN32
+    #####:  161:        if (!pendingChars.empty()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  162:            char c = pendingChars.front();
+call    0 never executed
+    #####:  163:            pendingChars.pop_front();
+call    0 never executed
+    #####:  164:            return c;
+        -:  165:        }
+        -:  166:
+    #####:  167:        if (!_kbhit()) return 0;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  168:        int c = _getch();
+call    0 never executed
+    #####:  169:        if (c == 0 || c == 224) {
+branch  0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+    #####:  170:            int code = _getch();
+call    0 never executed
+    #####:  171:            if (code == 72) { // up
+branch  0 never executed
+branch  1 never executed
+    #####:  172:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('A');
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+call   10 never executed
+call   11 never executed
+    #####:  173:            } else if (code == 80) { // down
+branch  0 never executed
+branch  1 never executed
+    #####:  174:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('B');
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+call   10 never executed
+call   11 never executed
+    #####:  175:            } else if (code == 77) { // right
+branch  0 never executed
+branch  1 never executed
+    #####:  176:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('C');
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+call   10 never executed
+call   11 never executed
+    #####:  177:            } else if (code == 75) { // left
+branch  0 never executed
+branch  1 never executed
+    #####:  178:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('D');
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+call   10 never executed
+        -:  179:            }
+    #####:  180:            char ch = pendingChars.front();
+call    0 never executed
+    #####:  181:            pendingChars.pop_front();
+call    0 never executed
+    #####:  182:            return ch;
+        -:  183:        } else {
+    #####:  184:            return (char)c;
+        -:  185:        }
+        -:  186:#else
+        -:  187:        char c = 0;
+        -:  188:        ssize_t r = read(STDIN_FILENO, &c, 1);
+        -:  189:        if (r <= 0) return 0;
+        -:  190:        return c;
+        -:  191:#endif
+        -:  192:    }
+        -:  193:
+function _ZN8Terminal7getSizeERiS0_ called 0 returned 0% blocks executed 0%
+    #####:  194:    void getSize(int& width, int& height) {
+        -:  195:#ifdef _WIN32
+        -:  196:        CONSOLE_SCREEN_BUFFER_INFO csbi;
+    #####:  197:        if (GetConsoleScreenBufferInfo(hStdout, &csbi)) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  198:            int cols = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    #####:  199:            int rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    #####:  200:            width = cols;
+    #####:  201:            height = rows;
+    #####:  202:            return;
+        -:  203:        }
+    #####:  204:        width = 80;
+    #####:  205:        height = 25;
+        -:  206:#else
+        -:  207:        struct winsize w;
+        -:  208:        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+        -:  209:        width = w.ws_col;
+        -:  210:        height = w.ws_row;
+        -:  211:#endif
+        -:  212:    }
+        -:  213:
+function _ZN8Terminal5sleepEi called 0 returned 0% blocks executed 0%
+    #####:  214:    void sleep(int ms) {
+        -:  215:#ifdef _WIN32
+    #####:  216:        ::Sleep(ms);
+call    0 never executed
+        -:  217:#else
+        -:  218:        usleep(ms * 1000);
+        -:  219:#endif
+    #####:  220:    }
+        -:  221:};
+        -:  222:
+        -:  223:// ======================================================
+        -:  224:// Game Data Structures
+        -:  225:// ======================================================
+        -:  226:struct ScoreData { int previousScore; int highScore; };
+        -:  227:
+function _Z10loadScoresRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE called 0 returned 0% blocks executed 0%
+    #####:  228:ScoreData loadScores(const string &filename = "scores.txt") {
+    #####:  229:    ScoreData s = {0, 0};
+    #####:  230:    ifstream in(filename);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+    #####:  231:    if (in.is_open()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  232:        in >> s.previousScore >> s.highScore;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+    #####:  233:        in.close();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  234:    }
+    #####:  235:    return s;
+        -:  236:}
+        -:  237:
+function _Z10saveScoresRK9ScoreDataRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE called 0 returned 0% blocks executed 0%
+    #####:  238:void saveScores(const ScoreData &s, const string &filename = "scores.txt") {
+    #####:  239:    ofstream out(filename, ios::trunc);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+    #####:  240:    if (out.is_open()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  241:        out << s.previousScore << " " << s.highScore << "\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  242:        out.close();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  243:    }
+    #####:  244:}
+        -:  245:
+        -:  246:struct Position {
+        -:  247:    int x, y;
+function _ZN8PositionC1Eii called 48 returned 100% blocks executed 100%
+       48:  248:    Position(int _x = 0, int _y = 0) : x(_x), y(_y) {}
+function _ZNK8PositioneqERKS_ called 41 returned 100% blocks executed 100%
+       41:  249:    bool operator==(const Position& o) const { return x == o.x && y == o.y; }
+branch  0 taken 10 (fallthrough)
+branch  1 taken 31
+branch  2 taken 9 (fallthrough)
+branch  3 taken 1
+        -:  250:};
+        -:  251:
+        -:  252:enum Direction { UP, DOWN, LEFT, RIGHT, NONE };
+        -:  253:
+        -:  254:// ======================================================
+        -:  255:// Symbol Configuration (Platform-aware)
+        -:  256:// ======================================================
+        -:  257:#ifdef _WIN32 // Windows: ASCII mode
+function __tcf_1 called 1 returned 100% blocks executed 100%
+        2:  258:const string EMOJI_FOOD = "O";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_2 called 1 returned 100% blocks executed 100%
+        2:  259:const string EMOJI_SNAKE_HEAD = "@";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_3 called 1 returned 100% blocks executed 100%
+        2:  260:const string EMOJI_SNAKE_BODY = "o";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_4 called 1 returned 100% blocks executed 100%
+        2:  261:const string BORDER_CELL = "##";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_5 called 1 returned 100% blocks executed 100%
+        2:  262:const string EMPTY_CELL = "  ";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 returned 1
+        -:  263:#else // Linux/macOS: Emoji mode
+        -:  264:const string EMOJI_FOOD = "🍎";
+        -:  265:const string EMOJI_SNAKE_HEAD = "🐍";
+        -:  266:const string EMOJI_SNAKE_BODY = "🟩";
+        -:  267:const string BORDER_CELL = "██";
+        -:  268:const string EMPTY_CELL = "  ";
+        -:  269:#endif
+        -:  270:
+        -:  271:// ======================================================
+        -:  272:// Food, Snake, GameBoard, and Game classes
+        -:  273:// ======================================================
+        -:  274:const int NUM_PLAYERS = 2;
+        -:  275:
+        -:  276:class Snake;
+        -:  277:
+        -:  278:// Food queries and respawning can be supplied without a terminal or real RNG.
+function _ZN10FoodSourceC2Ev called 10 returned 100% blocks executed 100%
+       10:  279:class FoodSource {
+        -:  280:public:
+function _ZN10FoodSourceD2Ev called 10 returned 100% blocks executed 100%
+       10:  281:    virtual ~FoodSource() = default;
+        -:  282:    virtual Position getPosition() const = 0;
+        -:  283:    virtual void spawn(int maxX, int maxY, const deque<Position>& snakeBody) = 0;
+        -:  284:};
+        -:  285:
+function _ZN4FoodD0Ev called 0 returned 0% blocks executed 0%
+function _ZN4FoodD1Ev called 0 returned 0% blocks executed 0%
+    #####:  286:class Food : public FoodSource {
+call    0 never executed
+call    1 never executed
+call    2 never executed
+call    3 never executed
+        -:  287:private:
+        -:  288:    Position pos;
+        -:  289:    string symbol;
+        -:  290:public:
+function _ZN4FoodC1Ev called 0 returned 0% blocks executed 0%
+    #####:  291:    Food() : symbol(EMOJI_FOOD) {}
+call    0 never executed
+call    1 never executed
+call    2 never executed
+branch  3 never executed
+branch  4 never executed
+call    5 never executed
+        -:  292:    // Declaration for the existing, currently unused multiplayer overload.
+        -:  293:    void spawn(int maxX, int maxY, const vector<Snake*>& snakes);
+function _ZNK4Food11getPositionEv called 0 returned 0% blocks executed 0%
+    #####:  294:    Position getPosition() const override { return pos; }
+function _ZNK4Food9getSymbolB5cxx11Ev called 0 returned 0% blocks executed 0%
+    #####:  295:    string getSymbol() const { return symbol; }
+call    0 never executed
+        -:  296:
+function _ZN4Food5spawnEiiRKSt5dequeI8PositionSaIS1_EE called 0 returned 0% blocks executed 0%
+    #####:  297:    void spawn(int maxX, int maxY, const deque<Position>& snakeBody) override {
+    #####:  298:        bool valid = false;
+    #####:  299:        while (!valid) {
+branch  0 never executed
+branch  1 never executed
+    #####:  300:            pos.x = rand() % (maxX - 2) + 1;
+call    0 never executed
+    #####:  301:            pos.y = rand() % (maxY - 2) + 1;
+call    0 never executed
+    #####:  302:            valid = true;
+    #####:  303:            for (const auto &s : snakeBody)
+call    0 never executed
+call    1 never executed
+call    2 never executed
+branch  3 never executed
+branch  4 never executed
+call    5 never executed
+call    6 never executed
+    #####:  304:                if (pos == s) { valid = false; break; }
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  305:        }
+    #####:  306:    }
+        -:  307:};
+        -:  308:
+function _ZN5SnakeD1Ev called 10 returned 100% blocks executed 100%
+       10:  309:class Snake {
+call    0 returned 10
+        -:  310:private:
+        -:  311:    deque<Position> body;
+        -:  312:    Direction current, next;
+        -:  313:    bool growing;
+        -:  314:public:
+function _ZN5SnakeC1Eii9Direction called 10 returned 100% blocks executed 69%
+       10:  315:    Snake(int startX, int startY, Direction startDir = RIGHT)
+       10:  316:        : current(startDir), next(startDir), growing(false) {
+call    0 returned 10
+call    1 never executed
+       10:  317:        body.push_back(Position(startX, startY));
+call    0 returned 10
+call    1 returned 10
+branch  2 taken 10 (fallthrough)
+branch  3 taken 0 (throw)
+       10:  318:        body.push_back(Position(startX - 1, startY));
+call    0 returned 10
+call    1 returned 10
+branch  2 taken 10 (fallthrough)
+branch  3 taken 0 (throw)
+       10:  319:        body.push_back(Position(startX - 2, startY));
+call    0 returned 10
+call    1 returned 10
+branch  2 taken 10 (fallthrough)
+branch  3 taken 0 (throw)
+       10:  320:    }
+function _ZNK5Snake7getBodyEv called 12 returned 100% blocks executed 100%
+       12:  321:    const deque<Position>& getBody() const { return body; }
+function _ZNK5Snake7getHeadEv called 42 returned 100% blocks executed 100%
+       42:  322:    Position getHead() const { return body.front(); }
+call    0 returned 42
+function _ZNK5Snake13getHeadSymbolB5cxx11Ev called 0 returned 0% blocks executed 0%
+    #####:  323:    string getHeadSymbol() const { return EMOJI_SNAKE_HEAD; }
+call    0 never executed
+function _ZNK5Snake13getBodySymbolB5cxx11Ev called 0 returned 0% blocks executed 0%
+    #####:  324:    string getBodySymbol() const { return EMOJI_SNAKE_BODY; }
+call    0 never executed
+        -:  325:
+function _ZN5Snake12setDirectionE9Direction called 3 returned 100% blocks executed 82%
+        3:  326:    void setDirection(Direction d) {
+        3:  327:        if ((d == UP && current == DOWN) || (d == DOWN && current == UP) ||
+branch  0 taken 1 (fallthrough)
+branch  1 taken 2
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0
+branch  4 taken 1 (fallthrough)
+branch  5 taken 2
+branch  6 taken 1 (fallthrough)
+branch  7 taken 0
+branch  8 taken 1 (fallthrough)
+branch  9 taken 2
+        1:  328:            (d == LEFT && current == RIGHT) || (d == RIGHT && current == LEFT))
+branch  0 taken 1 (fallthrough)
+branch  1 taken 0
+branch  2 taken 0 (fallthrough)
+branch  3 taken 3
+branch  4 never executed
+branch  5 never executed
+    #####:  329:            return;
+        3:  330:        next = d;
+        -:  331:    }
+        -:  332:
+function _ZN5Snake4moveEv called 16 returned 100% blocks executed 93%
+       16:  333:    void move() {
+       16:  334:        current = next;
+       16:  335:        Position head = getHead();
+call    0 returned 16
+       16:  336:        Position newHead = head;
+       16:  337:        switch (current) {
+branch  0 taken 1
+branch  1 taken 1
+branch  2 taken 1
+branch  3 taken 13
+branch  4 taken 0
+branch  5 taken 0
+        1:  338:            case UP: newHead.y--; break;
+        1:  339:            case DOWN: newHead.y++; break;
+        1:  340:            case LEFT: newHead.x--; break;
+       13:  341:            case RIGHT: newHead.x++; break;
+    #####:  342:            case NONE: return;
+        -:  343:        }
+       16:  344:        body.push_front(newHead);
+call    0 returned 16
+branch  1 taken 16 (fallthrough)
+branch  2 taken 0 (throw)
+       16:  345:        if (!growing) body.pop_back();
+branch  0 taken 11 (fallthrough)
+branch  1 taken 5
+call    2 returned 11
+        5:  346:        else growing = false;
+        -:  347:    }
+        -:  348:
+function _ZN5Snake4growEv called 10 returned 100% blocks executed 100%
+       10:  349:    void grow() { growing = true; }
+        -:  350:
+function _ZNK5Snake18checkSelfCollisionEv called 12 returned 100% blocks executed 100%
+       12:  351:    bool checkSelfCollision() const {
+       12:  352:        Position h = getHead();
+call    0 returned 12
+       40:  353:        for (size_t i = 1; i < body.size(); ++i)
+call    0 returned 40
+branch  1 taken 29 (fallthrough)
+branch  2 taken 11
+       29:  354:            if (h == body[i]) return true;
+call    0 returned 29
+call    1 returned 29
+branch  2 taken 1 (fallthrough)
+branch  3 taken 28
+       11:  355:        return false;
+        -:  356:    }
+        -:  357:
+        -:  358:    bool checkOtherCollision(const deque<Position>& otherBody) const {
+        -:  359:        Position h = getHead();
+        -:  360:        for (const auto& p : otherBody)
+        -:  361:            if (h == p) return true;
+        -:  362:        return false;
+        -:  363:    }
+        -:  364:};
+        -:  365:
+function _ZN4Food5spawnEiiRKSt6vectorIP5SnakeSaIS2_EE called 0 returned 0% blocks executed 0%
+    #####:  366:void Food::spawn(int maxX, int maxY, const vector<Snake*>& snakes) {
+    #####:  367:    bool valid = false;
+    #####:  368:    while (!valid) {
+branch  0 never executed
+branch  1 never executed
+    #####:  369:        pos.x = rand() % (maxX - 2) + 1;
+call    0 never executed
+    #####:  370:        pos.y = rand() % (maxY - 2) + 1;
+call    0 never executed
+    #####:  371:        valid = true;
+    #####:  372:        for (const auto &s : snakes) {
+call    0 never executed
+call    1 never executed
+call    2 never executed
+branch  3 never executed
+branch  4 never executed
+call    5 never executed
+call    6 never executed
+    #####:  373:            for (const auto &bodyPart : s->getBody()) {
+call    0 never executed
+call    1 never executed
+call    2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+call    7 never executed
+    #####:  374:                if (pos == bodyPart) { valid = false; break; }
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  375:            }
+    #####:  376:            if (!valid) break;
+branch  0 never executed
+branch  1 never executed
+        -:  377:        }
+        -:  378:    }
+    #####:  379:}
+        -:  380:
+function _ZN9GameBoardD1Ev called 10 returned 100% blocks executed 100%
+       10:  381:class GameBoard {
+call    0 returned 10
+        -:  382:private:
+        -:  383:    int width, height;
+        -:  384:    vector<vector<string>> grid;
+        -:  385:public:
+function _ZN9GameBoardC1Eii called 10 returned 100% blocks executed 64%
+       10:  386:    GameBoard(int w, int h) : width(w), height(h) {
+call    0 returned 10
+call    1 never executed
+       10:  387:        grid.assign(height, vector<string>(width, EMPTY_CELL));
+call    0 returned 10
+call    1 returned 10
+branch  2 taken 10 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 10
+branch  5 taken 10 (fallthrough)
+branch  6 taken 0 (throw)
+call    7 returned 10
+call    8 returned 10
+call    9 never executed
+call   10 never executed
+       10:  388:        clear();
+call    0 returned 10
+branch  1 taken 10 (fallthrough)
+branch  2 taken 0 (throw)
+       10:  389:    }
+function _ZNK9GameBoard8getWidthEv called 7 returned 100% blocks executed 100%
+        7:  390:    int getWidth() const { return width; }
+function _ZNK9GameBoard9getHeightEv called 7 returned 100% blocks executed 100%
+        7:  391:    int getHeight() const { return height; }
+        -:  392:
+function _ZN9GameBoard5clearEv called 10 returned 100% blocks executed 100%
+       10:  393:    void clear() {
+      130:  394:        for (int y = 0; y < height; ++y)
+branch  0 taken 120 (fallthrough)
+branch  1 taken 10
+     1560:  395:            for (int x = 0; x < width; ++x)
+branch  0 taken 1440 (fallthrough)
+branch  1 taken 120
+     2760:  396:                grid[y][x] = (y == 0 || y == height-1 || x == 0 || x == width-1)
+branch  0 taken 1200 (fallthrough)
+branch  1 taken 120
+branch  2 taken 1100 (fallthrough)
+branch  3 taken 100
+branch  4 taken 100 (fallthrough)
+branch  5 taken 1000
+call    6 returned 1440
+call    7 returned 1440
+     3320:  397:                              ? BORDER_CELL : EMPTY_CELL;
+branch  0 taken 1320 (fallthrough)
+branch  1 taken 120
+call    2 returned 1440
+       10:  398:    }
+        -:  399:
+function _ZN9GameBoard5placeEiiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE called 0 returned 0% blocks executed 0%
+    #####:  400:    void place(int x, int y, const string &sym) {
+    #####:  401:        if (x >= 0 && x < width && y >= 0 && y < height)
+branch  0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+branch  5 never executed
+branch  6 never executed
+branch  7 never executed
+    #####:  402:            grid[y][x] = sym;
+call    0 never executed
+call    1 never executed
+call    2 never executed
+    #####:  403:    }
+        -:  404:
+function _ZNK9GameBoard18isInsideBoundariesERK8Position called 13 returned 100% blocks executed 100%
+       13:  405:    bool isInsideBoundaries(const Position& p) const {
+       13:  406:        return p.x > 0 && p.x < width - 1 && p.y > 0 && p.y < height - 1;
+branch  0 taken 13 (fallthrough)
+branch  1 taken 0
+branch  2 taken 12 (fallthrough)
+branch  3 taken 1
+branch  4 taken 12 (fallthrough)
+branch  5 taken 0
+branch  6 taken 12 (fallthrough)
+branch  7 taken 0
+        -:  407:    }
+        -:  408:
+        -:  409:    // New render: build whole frame into stringstream and print once
+function _ZNK9GameBoard6renderER8Terminaliii called 0 returned 0% blocks executed 0%
+    #####:  410:    void render(Terminal& term, int score, int highScore, int prevScore) const {
+        -:  411:        // Move cursor to top-left once and overwrite
+    #####:  412:        term.moveCursor(1, 1);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  413:
+    #####:  414:        ostringstream out;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+        -:  415:        out << CYAN << "SNAKE GAME  " << RESET
+    #####:  416:            << " | Score: " << GREEN << score << RESET
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+call   12 never executed
+branch 13 never executed
+branch 14 never executed
+    #####:  417:            << " | Prev: " << YELLOW << prevScore << RESET
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  418:            << " | High: " << GREEN << highScore << RESET << "\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+call   12 never executed
+branch 13 never executed
+branch 14 never executed
+call   15 never executed
+branch 16 never executed
+branch 17 never executed
+call   18 never executed
+branch 19 never executed
+branch 20 never executed
+    #####:  419:        out << "Controls: P1: ARROW KEYS | P2: W/A/S/D | Q = Quit | P = Pause/Resume\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  420:
+        -:  421:        // Build the board rows
+    #####:  422:        for (int y = 0; y < height; ++y) {
+branch  0 never executed
+branch  1 never executed
+    #####:  423:            for (int x = 0; x < width; ++x) {
+branch  0 never executed
+branch  1 never executed
+    #####:  424:                const string &cell = grid[y][x];
+call    0 never executed
+call    1 never executed
+        -:  425:                // Choose colored representation inline
+    #####:  426:                if (cell == EMOJI_FOOD) out << RED << cell << RESET;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  427:                else if (cell == EMOJI_SNAKE_HEAD) out << GREEN << cell << RESET;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  428:                else if (cell == EMOJI_SNAKE_BODY) out << GREEN << cell << RESET;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  429:                else if (cell == BORDER_CELL) out << YELLOW << cell << RESET;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  430:                else out << cell;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  431:            }
+    #####:  432:            out << "\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  433:        }
+        -:  434:
+        -:  435:        // Print full frame once
+    #####:  436:        cout << out.str() << flush;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+call   10 never executed
+    #####:  437:    }
+        -:  438:};
+        -:  439:
+        -:  440:// Values changed by one tick; construction and restart retain the original defaults.
+function _ZN12GameProgressC1Ev called 0 returned 0% blocks executed 0%
+    #####:  441:struct GameProgress {
+        -:  442:    int score = 0;
+        -:  443:    int highScore = 0;
+        -:  444:    int appleCount = 0;
+        -:  445:    int speedMs = 140;
+        -:  446:    bool gameOver = false;
+        -:  447:};
+        -:  448:
+        -:  449:// One original Game::update tick, with the food collaborator supplied by the caller.
+        -:  450:// Growth remains deferred until the next move, as in the baseline game.
+function _Z11advanceGameR5SnakeRK9GameBoardR10FoodSourceR12GameProgressii called 13 returned 100% blocks executed 100%
+       13:  451:void advanceGame(Snake& snake, const GameBoard& board, FoodSource& food,
+        -:  452:                 GameProgress& progress, int speedStep = 8, int minSpeedMs = 30) {
+       13:  453:    snake.move();
+call    0 returned 13
+branch  1 taken 13 (fallthrough)
+branch  2 taken 0 (throw)
+       13:  454:    Position head = snake.getHead();
+call    0 returned 13
+        -:  455:
+       13:  456:    if (!board.isInsideBoundaries(head) || snake.checkSelfCollision()) {
+call    0 returned 13
+branch  1 taken 12 (fallthrough)
+branch  2 taken 1
+call    3 returned 12
+branch  4 taken 1 (fallthrough)
+branch  5 taken 11
+branch  6 taken 2 (fallthrough)
+branch  7 taken 11
+        2:  457:        progress.gameOver = true;
+        2:  458:        return;
+        -:  459:    }
+        -:  460:
+       11:  461:    if (head == food.getPosition()) {
+call    0 returned 11
+branch  1 taken 11 (fallthrough)
+branch  2 taken 0 (throw)
+call    3 returned 11
+branch  4 taken 7 (fallthrough)
+branch  5 taken 4
+        7:  462:        snake.grow();
+call    0 returned 7
+        7:  463:        progress.score++;
+        7:  464:        progress.appleCount++;
+        7:  465:        if (progress.appleCount >= 4) {
+branch  0 taken 2 (fallthrough)
+branch  1 taken 5
+        2:  466:            progress.speedMs = max(minSpeedMs, progress.speedMs - speedStep);
+call    0 returned 2
+        2:  467:            progress.appleCount = 0;
+        -:  468:        }
+        7:  469:        if (progress.score > progress.highScore) progress.highScore = progress.score;
+branch  0 taken 6 (fallthrough)
+branch  1 taken 1
+        7:  470:        food.spawn(board.getWidth(), board.getHeight(), snake.getBody());
+call    0 returned 7
+call    1 returned 7
+call    2 returned 7
+call    3 returned 7
+branch  4 taken 7 (fallthrough)
+branch  5 taken 0 (throw)
+        -:  471:    }
+        -:  472:}
+        -:  473:
+        -:  474:class Game {
+        -:  475:private:
+        -:  476:    Terminal term;
+        -:  477:    GameBoard* board;
+        -:  478:    Snake* snake;
+        -:  479:    Food* food;
+        -:  480:    GameProgress progress;
+        -:  481:    int previousScore;
+        -:  482:    bool running, paused;
+        -:  483:    const int speedStep = 8, minSpeedMs = 30;
+        -:  484:    int losingPlayer;
+        -:  485:    // Storage for the existing, unused setupSnakesAndFood helper.
+        -:  486:    vector<Snake*> snakes;
+        -:  487:
+        -:  488:    void setupSnakesAndFood() {
+        -:  489:        snakes.resize(NUM_PLAYERS);
+        -:  490:        for (int i = 0; i < NUM_PLAYERS; ++i) {
+        -:  491:            int sy = board->getHeight() / 2;
+        -:  492:            int sx;
+        -:  493:            Direction dir = RIGHT;
+        -:  494:            if (NUM_PLAYERS == 1) {
+        -:  495:                sx = board->getWidth() / 2;
+        -:  496:            } else {
+        -:  497:                sx = (board->getWidth() * (i + 1)) / (NUM_PLAYERS + 1);
+        -:  498:                if (i == 1) dir = LEFT;
+        -:  499:            }
+        -:  500:            snakes[i] = new Snake(sx, sy, dir);
+        -:  501:        }
+        -:  502:        food = new Food();
+        -:  503:        food->spawn(board->getWidth(), board->getHeight(), snakes);
+        -:  504:    }
+        -:  505:
+        -:  506:public:
+function _ZN4GameC1Ei called 0 returned 0% blocks executed 0%
+    #####:  507:    Game(int boardSize)
+    #####:  508:        : previousScore(0), running(true), paused(false), losingPlayer(0) {
+call    0 never executed
+call    1 never executed
+call    2 never executed
+call    3 never executed
+call    4 never executed
+        -:  509:
+    #####:  510:        term.hideCursor();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  511:        ScoreData loaded = loadScores();
+call    0 never executed
+call    1 never executed
+branch  2 never executed
+branch  3 never executed
+call    4 never executed
+branch  5 never executed
+branch  6 never executed
+call    7 never executed
+call    8 never executed
+call    9 never executed
+call   10 never executed
+    #####:  512:        previousScore = loaded.previousScore;
+    #####:  513:        progress.highScore = loaded.highScore;
+        -:  514:
+    #####:  515:        board = new GameBoard(boardSize, boardSize);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+    #####:  516:        int sx = boardSize / 2, sy = boardSize / 2;
+    #####:  517:        snake = new Snake(sx, sy);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+    #####:  518:        food = new Food();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+    #####:  519:        food->spawn(board->getWidth(), board->getHeight(), snake->getBody());
+call    0 never executed
+call    1 never executed
+call    2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+    #####:  520:    }
+        -:  521:
+function _ZN4GameD1Ev called 0 returned 0% blocks executed 0%
+    #####:  522:    ~Game() {
+call    0 never executed
+call    1 never executed
+    #####:  523:        delete board;
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+call    3 never executed
+    #####:  524:        delete snake;
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+call    3 never executed
+    #####:  525:        delete food;
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  526:        term.showCursor();
+call    0 never executed
+    #####:  527:    }
+        -:  528:
+function _ZN4Game11handleInputEv called 0 returned 0% blocks executed 0%
+    #####:  529:    void handleInput() {
+    #####:  530:        if (!term.kbhit()) return;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  531:        char k = term.getch();
+call    0 never executed
+    #####:  532:        if (k == 0) return;
+branch  0 never executed
+branch  1 never executed
+        -:  533:
+    #####:  534:        if (k == 27) {
+branch  0 never executed
+branch  1 never executed
+    #####:  535:            if (term.kbhit()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  536:                char b1 = term.getch();
+call    0 never executed
+    #####:  537:                if (b1 == '[' && term.kbhit()) {
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+branch  3 never executed
+branch  4 never executed
+branch  5 never executed
+branch  6 never executed
+    #####:  538:                    char b2 = term.getch();
+call    0 never executed
+    #####:  539:                    if (b2 == 'A') snake->setDirection(UP);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  540:                    else if (b2 == 'B') snake->setDirection(DOWN);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  541:                    else if (b2 == 'C') snake->setDirection(RIGHT);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  542:                    else if (b2 == 'D') snake->setDirection(LEFT);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+        -:  543:                }
+        -:  544:            }
+        -:  545:        } else {
+    #####:  546:            k = toupper(k);
+    #####:  547:            if (k == 'W') snake->setDirection(UP);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  548:            else if (k == 'S') snake->setDirection(DOWN);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  549:            else if (k == 'A') snake->setDirection(LEFT);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  550:            else if (k == 'D') snake->setDirection(RIGHT);
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  551:            else if (k == 'Q') running = false;
+branch  0 never executed
+branch  1 never executed
+    #####:  552:            else if (k == 'P') togglePause();
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+        -:  553:        }
+        -:  554:    }
+        -:  555:
+function _ZN4Game11togglePauseEv called 0 returned 0% blocks executed 0%
+    #####:  556:    void togglePause() {
+    #####:  557:        paused = !paused;
+    #####:  558:        if (paused) {
+branch  0 never executed
+branch  1 never executed
+    #####:  559:            showPauseScreen();
+call    0 never executed
+        -:  560:        }
+    #####:  561:    }
+        -:  562:
+function _ZN4Game15showPauseScreenEv called 0 returned 0% blocks executed 0%
+    #####:  563:    void showPauseScreen() {
+        -:  564:        // 🧹 Clear bottom section and print pause message
+    #####:  565:        term.moveCursor(1, board->getHeight() + 6);
+call    0 never executed
+call    1 never executed
+        -:  566:        cout << "\n" << YELLOW
+        -:  567:             << "\t=============================\n"
+        -:  568:             << "\t       GAME PAUSED\n"
+        -:  569:             << "\t=============================\n"
+        -:  570:             << "\t Press P to Resume\n"
+    #####:  571:             << RESET << flush;
+call    0 never executed
+call    1 never executed
+call    2 never executed
+call    3 never executed
+call    4 never executed
+call    5 never executed
+call    6 never executed
+call    7 never executed
+        -:  572:
+        -:  573:        // Wait until user presses P again
+    #####:  574:        while (paused && running) {
+branch  0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+    #####:  575:            if (term.kbhit()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  576:                char k = toupper(term.getch());
+call    0 never executed
+    #####:  577:                if (k == 'P') {
+branch  0 never executed
+branch  1 never executed
+    #####:  578:                    paused = false;
+    #####:  579:                    term.clearScreen();
+call    0 never executed
+    #####:  580:                    render(); // redraw fresh frame after resume
+call    0 never executed
+    #####:  581:                    return;
+    #####:  582:                } else if (k == 'Q') {
+branch  0 never executed
+branch  1 never executed
+    #####:  583:                    running = false;
+    #####:  584:                    return;
+        -:  585:                }
+        -:  586:            }
+    #####:  587:            term.sleep(100);
+call    0 never executed
+        -:  588:        }
+        -:  589:    }
+        -:  590:
+function _ZN4Game6updateEv called 0 returned 0% blocks executed 0%
+    #####:  591:    void update() {
+    #####:  592:        advanceGame(*snake, *board, *food, progress, speedStep, minSpeedMs);
+call    0 never executed
+    #####:  593:    }
+        -:  594:
+function _ZN4Game6renderEv called 0 returned 0% blocks executed 0%
+    #####:  595:    void render() {
+    #####:  596:        board->clear();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  597:        Position fpos = food->getPosition();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  598:        board->place(fpos.x, fpos.y, food->getSymbol());
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+call    7 never executed
+    #####:  599:        const deque<Position>& body = snake->getBody();
+call    0 never executed
+    #####:  600:        for (size_t i = 0; i < body.size(); ++i)
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  601:            board->place(body[i].x, body[i].y,
+call    0 never executed
+call    1 never executed
+    #####:  602:                         (i == 0) ? snake->getHeadSymbol() : snake->getBodySymbol());
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+branch  3 never executed
+branch  4 never executed
+call    5 never executed
+branch  6 never executed
+branch  7 never executed
+call    8 never executed
+branch  9 never executed
+branch 10 never executed
+call   11 never executed
+call   12 never executed
+    #####:  603:        board->render(term, progress.score, progress.highScore, previousScore);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  604:    }
+        -:  605:
+function _ZN4Game12showGameOverEv called 0 returned 0% blocks executed 0%
+    #####:  606:    void showGameOver() {
+    #####:  607:        previousScore = progress.score;
+    #####:  608:        if (progress.score > progress.highScore) progress.highScore = progress.score;
+branch  0 never executed
+branch  1 never executed
+    #####:  609:        saveScores({ previousScore, progress.highScore });
+call    0 never executed
+call    1 never executed
+branch  2 never executed
+branch  3 never executed
+call    4 never executed
+branch  5 never executed
+branch  6 never executed
+call    7 never executed
+call    8 never executed
+call    9 never executed
+call   10 never executed
+        -:  610:
+    #####:  611:        term.clearScreen();
+call    0 never executed
+    #####:  612:        term.moveCursor(1, 1);
+call    0 never executed
+        -:  613:
+    #####:  614:        cout << "\n\n\t ================================\n";
+call    0 never executed
+    #####:  615:        cout << "\t         GAME OVER!\n";
+call    0 never executed
+    #####:  616:        cout << "\t ================================\n\n";
+call    0 never executed
+    #####:  617:        cout << "\t   Final Score: " << progress.score << "\n";
+call    0 never executed
+call    1 never executed
+call    2 never executed
+    #####:  618:        cout << "\t   High Score: " << progress.highScore << "\n";
+call    0 never executed
+call    1 never executed
+call    2 never executed
+    #####:  619:        cout << "\t   Previous Score: " << previousScore << "\n";
+call    0 never executed
+call    1 never executed
+call    2 never executed
+    #####:  620:        cout << "\n\t ================================\n\n";
+call    0 never executed
+    #####:  621:        cout << "\t Press R to Restart, Q to Quit\n\n" << flush;
+call    0 never executed
+call    1 never executed
+        -:  622:
+        -:  623:        while (true) {
+    #####:  624:            if (term.kbhit()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  625:                char k = toupper(term.getch());
+call    0 never executed
+    #####:  626:                if (k == 'R') {
+branch  0 never executed
+branch  1 never executed
+    #####:  627:                    term.clearScreen();
+call    0 never executed
+    #####:  628:                    restart();
+call    0 never executed
+    #####:  629:                    return;
+    #####:  630:                } else if (k == 'Q') {
+branch  0 never executed
+branch  1 never executed
+    #####:  631:                    term.clearScreen();
+call    0 never executed
+    #####:  632:                    running = false;
+    #####:  633:                    return;
+        -:  634:                }
+        -:  635:            }
+    #####:  636:            term.sleep(50);
+call    0 never executed
+    #####:  637:        }
+        -:  638:    }
+        -:  639:
+function _ZN4Game7restartEv called 0 returned 0% blocks executed 0%
+    #####:  640:    void restart() {
+    #####:  641:        delete snake;
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+call    3 never executed
+    #####:  642:        delete food;
+branch  0 never executed
+branch  1 never executed
+call    2 never executed
+    #####:  643:        progress.score = 0;
+    #####:  644:        progress.gameOver = false;
+    #####:  645:        paused = false;
+    #####:  646:        progress.speedMs = 140;
+    #####:  647:        progress.appleCount = 0;
+        -:  648:
+    #####:  649:        int sx = board->getWidth() / 2, sy = board->getHeight() / 2;
+call    0 never executed
+call    1 never executed
+    #####:  650:        snake = new Snake(sx, sy);
+call    0 never executed
+call    1 never executed
+branch  2 never executed
+branch  3 never executed
+call    4 never executed
+call    5 never executed
+    #####:  651:        food = new Food();
+call    0 never executed
+call    1 never executed
+branch  2 never executed
+branch  3 never executed
+call    4 never executed
+    #####:  652:        food->spawn(board->getWidth(), board->getHeight(), snake->getBody());
+call    0 never executed
+call    1 never executed
+call    2 never executed
+call    3 never executed
+        -:  653:
+    #####:  654:        term.clearScreen();
+call    0 never executed
+    #####:  655:        term.moveCursor(1, 1);
+call    0 never executed
+    #####:  656:    }
+        -:  657:
+function _ZN4Game3runEv called 0 returned 0% blocks executed 0%
+    #####:  658:    void run() {
+    #####:  659:        render();
+call    0 never executed
+    #####:  660:        while (running) {
+branch  0 never executed
+branch  1 never executed
+    #####:  661:            if (progress.gameOver) {
+branch  0 never executed
+branch  1 never executed
+    #####:  662:                showGameOver();
+call    0 never executed
+    #####:  663:            } else if (!paused) {
+branch  0 never executed
+branch  1 never executed
+    #####:  664:                handleInput();
+call    0 never executed
+    #####:  665:                update();
+call    0 never executed
+    #####:  666:                render();
+call    0 never executed
+    #####:  667:                term.sleep(progress.speedMs);
+call    0 never executed
+        -:  668:            } else {
+        -:  669:                // still handle pause input while paused
+    #####:  670:                handleInput();
+call    0 never executed
+    #####:  671:                term.sleep(100);
+call    0 never executed
+        -:  672:            }
+        -:  673:        }
+    #####:  674:    }
+        -:  675:};
+        -:  676:
+        -:  677:
+        -:  678:
+        -:  679:// ======================================================
+        -:  680:// MAIN
+        -:  681:// ======================================================
+function _Z21snakexInteractiveMainv called 0 returned 0% blocks executed 0%
+    #####:  682:int main() {
+    #####:  683:    srand((unsigned)time(0));
+call    0 never executed
+call    1 never executed
+    #####:  684:    Terminal term;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+        -:  685:
+        -:  686:    int consoleW, consoleH;
+    #####:  687:    term.getSize(consoleW, consoleH);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  688:
+    #####:  689:    int gameSize = min((consoleW - 2) / 2, consoleH - 6);
+call    0 never executed
+    #####:  690:    if (gameSize < 10) gameSize = 10;
+branch  0 never executed
+branch  1 never executed
+        -:  691:
+    #####:  692:    term.clearScreen();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  693:    term.hideCursor();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  694:
+        -:  695:#ifdef _WIN32
+    #####:  696:    cout << "[Windows mode detected — ASCII graphics]\n\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  697:#else
+        -:  698:    cout << "[Unix mode detected — Emoji graphics]\n\n";
+        -:  699:#endif
+        -:  700:
+    #####:  701:    cout << "===================================\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  702:    cout << "       WELCOME TO SNAKE GAME\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  703:    cout << "===================================\n\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  704:    cout << "Saved High Score: " << loadScores().highScore << "\n\n";
+call    0 never executed
+call    1 never executed
+branch  2 never executed
+branch  3 never executed
+call    4 never executed
+branch  5 never executed
+branch  6 never executed
+call    7 never executed
+branch  8 never executed
+branch  9 never executed
+call   10 never executed
+branch 11 never executed
+branch 12 never executed
+call   13 never executed
+branch 14 never executed
+branch 15 never executed
+call   16 never executed
+call   17 never executed
+call   18 never executed
+call   19 never executed
+    #####:  705:    cout << "Instructions:\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  706:    cout << "  - Use W/A/S/D or ARROW KEYS to control the snake\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  707:    cout << "  - Eat " << EMOJI_FOOD << " to grow and score\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+    #####:  708:    cout << "  - Speed increases after every 4 apples eaten\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  709:    cout << "  - Avoid walls and yourself\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  710:    cout << "  - Press Q to quit anytime\n\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  711:    cout << "  - Press P to Pause/Resume anytime\n\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  712:    cout << "Press any key to start...\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  713:
+    #####:  714:    while (!term.kbhit()) term.sleep(50);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+    #####:  715:    term.getch();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  716:
+    #####:  717:    Game game(gameSize);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+    #####:  718:    game.run();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  719:
+    #####:  720:    term.clearScreen();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  721:    term.showCursor();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  722:    cout << "\nThank you for playing! Your scores are saved to scores.txt\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+    #####:  723:    return 0;
+        -:  724:}

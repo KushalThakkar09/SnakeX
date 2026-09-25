@@ -1,0 +1,930 @@
+        -:    0:Source:<repo>/lab4/build/baseline/base-game.cpp
+        -:    0:Graph:tests.gcno
+        -:    0:Data:tests.gcda
+        -:    0:Runs:1
+        -:    0:Programs:1
+        -:    1:// Simple Snake Game - Cross-Platform Terminal Version (Improved rendering: no flicker)
+        -:    2:// Auto-adapts graphics for Windows (ASCII) or Linux/macOS (Emoji)
+        -:    3:// Compile: g++ -std=c++17 snake.cpp -o snake
+        -:    4:
+        -:    5:#include <iostream>
+        -:    6:#include <cstdlib>
+        -:    7:#include <ctime>
+        -:    8:#include <deque>
+        -:    9:#include <vector>
+        -:   10:#include <string>
+        -:   11:#include <fstream>
+        -:   12:#include <sstream>
+        -:   13:
+        -:   14:#ifdef _WIN32
+        -:   15:    #include <conio.h>
+        -:   16:    #include <windows.h>
+        -:   17:
+        -:   18:    #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        -:   19:    #define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+        -:   20:    #endif
+        -:   21:#else
+        -:   22:    // POSIX
+        -:   23:    #include <termios.h>
+        -:   24:    #include <unistd.h>
+        -:   25:    #include <sys/ioctl.h>
+        -:   26:    #include <sys/select.h>
+        -:   27:#endif
+        -:   28:
+        -:   29:using namespace std;
+        -:   30:
+        -:   31:// ANSI colors
+        -:   32:#define RED    "\033[31m"
+        -:   33:#define GREEN  "\033[32m"
+        -:   34:#define YELLOW "\033[33m"
+        -:   35:#define CYAN   "\033[36m"
+        -:   36:#define RESET  "\033[0m"
+        -:   37:
+        -:   38:// ======================================================
+        -:   39:// Cross-platform Terminal abstraction
+        -:   40:// ======================================================
+        -:   41:class Terminal {
+        -:   42:private:
+        -:   43:#ifdef _WIN32
+        -:   44:    HANDLE hStdin;
+        -:   45:    HANDLE hStdout;
+        -:   46:    CONSOLE_CURSOR_INFO originalCursorInfo;
+        -:   47:    bool cursorInfoSaved = false;
+        -:   48:    deque<char> pendingChars;
+        -:   49:#else
+        -:   50:    struct termios original;
+        -:   51:#endif
+        -:   52:
+        -:   53:public:
+        -:   54:    Terminal() {
+        -:   55:#ifdef _WIN32
+        -:   56:        hStdin = GetStdHandle(STD_INPUT_HANDLE);
+        -:   57:        hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        -:   58:
+        -:   59:        CONSOLE_CURSOR_INFO cinfo;
+        -:   60:        if (GetConsoleCursorInfo(hStdout, &cinfo)) {
+        -:   61:            originalCursorInfo = cinfo;
+        -:   62:            cursorInfoSaved = true;
+        -:   63:        }
+        -:   64:
+        -:   65:        DWORD mode = 0;
+        -:   66:        if (GetConsoleMode(hStdout, &mode)) {
+        -:   67:            SetConsoleMode(hStdout, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        -:   68:        }
+        -:   69:#else
+        -:   70:        tcgetattr(STDIN_FILENO, &original);
+        -:   71:        struct termios raw = original;
+        -:   72:        raw.c_lflag &= ~(ICANON | ECHO);
+        -:   73:        raw.c_cc[VMIN] = 0;
+        -:   74:        raw.c_cc[VTIME] = 0;
+        -:   75:        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        -:   76:#endif
+        -:   77:    }
+        -:   78:
+        -:   79:    ~Terminal() {
+        -:   80:#ifdef _WIN32
+        -:   81:        if (cursorInfoSaved) {
+        -:   82:            SetConsoleCursorInfo(hStdout, &originalCursorInfo);
+        -:   83:        }
+        -:   84:#else
+        -:   85:        tcsetattr(STDIN_FILENO, TCSAFLUSH, &original);
+        -:   86:        showCursor();
+        -:   87:#endif
+        -:   88:    }
+        -:   89:
+        -:   90:    void hideCursor() {
+        -:   91:#ifdef _WIN32
+        -:   92:        CONSOLE_CURSOR_INFO cci;
+        -:   93:        if (GetConsoleCursorInfo(hStdout, &cci)) {
+        -:   94:            cci.bVisible = FALSE;
+        -:   95:            SetConsoleCursorInfo(hStdout, &cci);
+        -:   96:        }
+        -:   97:#else
+        -:   98:        cout << "\033[?25l" << flush;
+        -:   99:#endif
+        -:  100:    }
+        -:  101:
+        -:  102:    void showCursor() {
+        -:  103:#ifdef _WIN32
+        -:  104:        CONSOLE_CURSOR_INFO cci;
+        -:  105:        if (GetConsoleCursorInfo(hStdout, &cci)) {
+        -:  106:            cci.bVisible = TRUE;
+        -:  107:            SetConsoleCursorInfo(hStdout, &cci);
+        -:  108:        }
+        -:  109:#else
+        -:  110:        cout << "\033[?25h" << flush;
+        -:  111:#endif
+        -:  112:    }
+        -:  113:
+        -:  114:    void clearScreen() {
+        -:  115:#ifdef _WIN32
+        -:  116:        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        -:  117:        DWORD cellCount;
+        -:  118:        DWORD count;
+        -:  119:        COORD homeCoords = {0, 0};
+        -:  120:
+        -:  121:        if (!GetConsoleScreenBufferInfo(hStdout, &csbi)) {
+        -:  122:            system("cls");
+        -:  123:            return;
+        -:  124:        }
+        -:  125:
+        -:  126:        cellCount = csbi.dwSize.X * csbi.dwSize.Y;
+        -:  127:        FillConsoleOutputCharacter(hStdout, ' ', cellCount, homeCoords, &count);
+        -:  128:        FillConsoleOutputAttribute(hStdout, csbi.wAttributes, cellCount, homeCoords, &count);
+        -:  129:        SetConsoleCursorPosition(hStdout, homeCoords);
+        -:  130:#else
+        -:  131:        cout << "\033[2J\033[H" << flush;
+        -:  132:#endif
+        -:  133:    }
+        -:  134:
+        -:  135:    void moveCursor(int x, int y) {
+        -:  136:#ifdef _WIN32
+        -:  137:        COORD pos;
+        -:  138:        pos.X = (SHORT)(max(0, x - 1));
+        -:  139:        pos.Y = (SHORT)(max(0, y - 1));
+        -:  140:        SetConsoleCursorPosition(hStdout, pos);
+        -:  141:#else
+        -:  142:        cout << "\033[" << y << ";" << x << "H" << flush;
+        -:  143:#endif
+        -:  144:    }
+        -:  145:
+        -:  146:    bool kbhit() {
+        -:  147:#ifdef _WIN32
+        -:  148:        if (!pendingChars.empty()) return true;
+        -:  149:        return _kbhit() != 0;
+        -:  150:#else
+        -:  151:        struct timeval tv = {0, 0};
+        -:  152:        fd_set readfds;
+        -:  153:        FD_ZERO(&readfds);
+        -:  154:        FD_SET(STDIN_FILENO, &readfds);
+        -:  155:        return select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv) == 1;
+        -:  156:#endif
+        -:  157:    }
+        -:  158:
+        -:  159:    char getch() {
+        -:  160:#ifdef _WIN32
+        -:  161:        if (!pendingChars.empty()) {
+        -:  162:            char c = pendingChars.front();
+        -:  163:            pendingChars.pop_front();
+        -:  164:            return c;
+        -:  165:        }
+        -:  166:
+        -:  167:        if (!_kbhit()) return 0;
+        -:  168:        int c = _getch();
+        -:  169:        if (c == 0 || c == 224) {
+        -:  170:            int code = _getch();
+        -:  171:            if (code == 72) { // up
+        -:  172:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('A');
+        -:  173:            } else if (code == 80) { // down
+        -:  174:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('B');
+        -:  175:            } else if (code == 77) { // right
+        -:  176:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('C');
+        -:  177:            } else if (code == 75) { // left
+        -:  178:                pendingChars.push_back(27); pendingChars.push_back('['); pendingChars.push_back('D');
+        -:  179:            }
+        -:  180:            char ch = pendingChars.front();
+        -:  181:            pendingChars.pop_front();
+        -:  182:            return ch;
+        -:  183:        } else {
+        -:  184:            return (char)c;
+        -:  185:        }
+        -:  186:#else
+        -:  187:        char c = 0;
+        -:  188:        ssize_t r = read(STDIN_FILENO, &c, 1);
+        -:  189:        if (r <= 0) return 0;
+        -:  190:        return c;
+        -:  191:#endif
+        -:  192:    }
+        -:  193:
+        -:  194:    void getSize(int& width, int& height) {
+        -:  195:#ifdef _WIN32
+        -:  196:        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        -:  197:        if (GetConsoleScreenBufferInfo(hStdout, &csbi)) {
+        -:  198:            int cols = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        -:  199:            int rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+        -:  200:            width = cols;
+        -:  201:            height = rows;
+        -:  202:            return;
+        -:  203:        }
+        -:  204:        width = 80;
+        -:  205:        height = 25;
+        -:  206:#else
+        -:  207:        struct winsize w;
+        -:  208:        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+        -:  209:        width = w.ws_col;
+        -:  210:        height = w.ws_row;
+        -:  211:#endif
+        -:  212:    }
+        -:  213:
+        -:  214:    void sleep(int ms) {
+        -:  215:#ifdef _WIN32
+        -:  216:        ::Sleep(ms);
+        -:  217:#else
+        -:  218:        usleep(ms * 1000);
+        -:  219:#endif
+        -:  220:    }
+        -:  221:};
+        -:  222:
+        -:  223:// ======================================================
+        -:  224:// Game Data Structures
+        -:  225:// ======================================================
+        -:  226:struct ScoreData { int previousScore; int highScore; };
+        -:  227:
+function _Z10loadScoresRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE called 0 returned 0% blocks executed 0%
+    #####:  228:ScoreData loadScores(const string &filename = "scores.txt") {
+    #####:  229:    ScoreData s = {0, 0};
+    #####:  230:    ifstream in(filename);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+    #####:  231:    if (in.is_open()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  232:        in >> s.previousScore >> s.highScore;
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+    #####:  233:        in.close();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  234:    }
+    #####:  235:    return s;
+        -:  236:}
+        -:  237:
+function _Z10saveScoresRK9ScoreDataRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE called 0 returned 0% blocks executed 0%
+    #####:  238:void saveScores(const ScoreData &s, const string &filename = "scores.txt") {
+    #####:  239:    ofstream out(filename, ios::trunc);
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+call    4 never executed
+    #####:  240:    if (out.is_open()) {
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+branch  3 never executed
+branch  4 never executed
+    #####:  241:        out << s.previousScore << " " << s.highScore << "\n";
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+call    3 never executed
+branch  4 never executed
+branch  5 never executed
+call    6 never executed
+branch  7 never executed
+branch  8 never executed
+call    9 never executed
+branch 10 never executed
+branch 11 never executed
+    #####:  242:        out.close();
+call    0 never executed
+branch  1 never executed
+branch  2 never executed
+        -:  243:    }
+    #####:  244:}
+        -:  245:
+        -:  246:struct Position {
+        -:  247:    int x, y;
+function _ZN8PositionC1Eii called 23 returned 100% blocks executed 100%
+       23:  248:    Position(int _x = 0, int _y = 0) : x(_x), y(_y) {}
+function _ZNK8PositioneqERKS_ called 617 returned 100% blocks executed 100%
+      617:  249:    bool operator==(const Position& o) const { return x == o.x && y == o.y; }
+branch  0 taken 71 (fallthrough)
+branch  1 taken 546
+branch  2 taken 8 (fallthrough)
+branch  3 taken 63
+        -:  250:};
+        -:  251:
+        -:  252:enum Direction { UP, DOWN, LEFT, RIGHT, NONE };
+        -:  253:
+        -:  254:// ======================================================
+        -:  255:// Symbol Configuration (Platform-aware)
+        -:  256:// ======================================================
+        -:  257:#ifdef _WIN32 // Windows: ASCII mode
+function __tcf_1 called 1 returned 100% blocks executed 100%
+        2:  258:const string EMOJI_FOOD = "O";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_2 called 1 returned 100% blocks executed 100%
+        2:  259:const string EMOJI_SNAKE_HEAD = "@";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_3 called 1 returned 100% blocks executed 100%
+        2:  260:const string EMOJI_SNAKE_BODY = "o";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_4 called 1 returned 100% blocks executed 100%
+        2:  261:const string BORDER_CELL = "##";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 never executed
+call    8 returned 1
+function __tcf_5 called 1 returned 100% blocks executed 100%
+        2:  262:const string EMPTY_CELL = "  ";
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+call    5 returned 1
+call    6 never executed
+call    7 returned 1
+        -:  263:#else // Linux/macOS: Emoji mode
+        -:  264:const string EMOJI_FOOD = "🍎";
+        -:  265:const string EMOJI_SNAKE_HEAD = "🐍";
+        -:  266:const string EMOJI_SNAKE_BODY = "🟩";
+        -:  267:const string BORDER_CELL = "██";
+        -:  268:const string EMPTY_CELL = "  ";
+        -:  269:#endif
+        -:  270:
+        -:  271:// ======================================================
+        -:  272:// Food, Snake, GameBoard, and Game classes
+        -:  273:// ======================================================
+        -:  274:const int NUM_PLAYERS = 2;
+        -:  275:
+        -:  276:class Snake;
+        -:  277:
+function _ZN4FoodD1Ev called 1 returned 100% blocks executed 100%
+        1:  278:class Food {
+call    0 returned 1
+        -:  279:private:
+        -:  280:    Position pos;
+        -:  281:    string symbol;
+        -:  282:public:
+function _ZN4FoodC1Ev called 1 returned 100% blocks executed 100%
+        1:  283:    Food() : symbol(EMOJI_FOOD) {}
+call    0 returned 1
+call    1 returned 1
+function _ZNK4Food11getPositionEv called 100 returned 100% blocks executed 100%
+      100:  284:    Position getPosition() const { return pos; }
+        -:  285:    string getSymbol() const { return symbol; }
+        -:  286:
+function _ZN4Food5spawnEiiRKSt5dequeI8PositionSaIS1_EE called 100 returned 100% blocks executed 100%
+      100:  287:    void spawn(int maxX, int maxY, const deque<Position>& snakeBody) {
+      100:  288:        bool valid = false;
+      306:  289:        while (!valid) {
+branch  0 taken 103 (fallthrough)
+branch  1 taken 100
+      103:  290:            pos.x = rand() % (maxX - 2) + 1;
+call    0 returned 103
+      103:  291:            pos.y = rand() % (maxY - 2) + 1;
+call    0 returned 103
+      103:  292:            valid = true;
+      407:  293:            for (const auto &s : snakeBody)
+call    0 returned 103
+call    1 returned 103
+call    2 returned 407
+branch  3 taken 307 (fallthrough)
+branch  4 taken 100
+call    5 returned 307
+call    6 returned 304
+      307:  294:                if (pos == s) { valid = false; break; }
+call    0 returned 307
+branch  1 taken 3 (fallthrough)
+branch  2 taken 304
+        -:  295:        }
+      100:  296:    }
+        -:  297:};
+        -:  298:
+function _ZN5SnakeD1Ev called 3 returned 100% blocks executed 100%
+        3:  299:class Snake {
+call    0 returned 3
+        -:  300:private:
+        -:  301:    deque<Position> body;
+        -:  302:    Direction current, next;
+        -:  303:    bool growing;
+        -:  304:public:
+function _ZN5SnakeC1Eii9Direction called 3 returned 100% blocks executed 69%
+        3:  305:    Snake(int startX, int startY, Direction startDir = RIGHT)
+        3:  306:        : current(startDir), next(startDir), growing(false) {
+call    0 returned 3
+call    1 never executed
+        3:  307:        body.push_back(Position(startX, startY));
+call    0 returned 3
+call    1 returned 3
+branch  2 taken 3 (fallthrough)
+branch  3 taken 0 (throw)
+        3:  308:        body.push_back(Position(startX - 1, startY));
+call    0 returned 3
+call    1 returned 3
+branch  2 taken 3 (fallthrough)
+branch  3 taken 0 (throw)
+        3:  309:        body.push_back(Position(startX - 2, startY));
+call    0 returned 3
+call    1 returned 3
+branch  2 taken 3 (fallthrough)
+branch  3 taken 0 (throw)
+        3:  310:    }
+function _ZNK5Snake7getBodyEv called 1 returned 100% blocks executed 100%
+        1:  311:    const deque<Position>& getBody() const { return body; }
+function _ZNK5Snake7getHeadEv called 13 returned 100% blocks executed 100%
+       13:  312:    Position getHead() const { return body.front(); }
+call    0 returned 13
+        -:  313:    string getHeadSymbol() const { return EMOJI_SNAKE_HEAD; }
+        -:  314:    string getBodySymbol() const { return EMOJI_SNAKE_BODY; }
+        -:  315:
+function _ZN5Snake12setDirectionE9Direction called 4 returned 100% blocks executed 91%
+        4:  316:    void setDirection(Direction d) {
+        4:  317:        if ((d == UP && current == DOWN) || (d == DOWN && current == UP) ||
+branch  0 taken 1 (fallthrough)
+branch  1 taken 3
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0
+branch  4 taken 1 (fallthrough)
+branch  5 taken 3
+branch  6 taken 1 (fallthrough)
+branch  7 taken 0
+branch  8 taken 2 (fallthrough)
+branch  9 taken 2
+        2:  318:            (d == LEFT && current == RIGHT) || (d == RIGHT && current == LEFT))
+branch  0 taken 1 (fallthrough)
+branch  1 taken 1
+branch  2 taken 0 (fallthrough)
+branch  3 taken 3
+branch  4 never executed
+branch  5 never executed
+        1:  319:            return;
+        3:  320:        next = d;
+        -:  321:    }
+        -:  322:
+function _ZN5Snake4moveEv called 7 returned 100% blocks executed 93%
+        7:  323:    void move() {
+        7:  324:        current = next;
+        7:  325:        Position head = getHead();
+call    0 returned 7
+        7:  326:        Position newHead = head;
+        7:  327:        switch (current) {
+branch  0 taken 1
+branch  1 taken 1
+branch  2 taken 1
+branch  3 taken 4
+branch  4 taken 0
+branch  5 taken 0
+        1:  328:            case UP: newHead.y--; break;
+        1:  329:            case DOWN: newHead.y++; break;
+        1:  330:            case LEFT: newHead.x--; break;
+        4:  331:            case RIGHT: newHead.x++; break;
+    #####:  332:            case NONE: return;
+        -:  333:        }
+        7:  334:        body.push_front(newHead);
+call    0 returned 7
+branch  1 taken 7 (fallthrough)
+branch  2 taken 0 (throw)
+        7:  335:        if (!growing) body.pop_back();
+branch  0 taken 4 (fallthrough)
+branch  1 taken 3
+call    2 returned 4
+        3:  336:        else growing = false;
+        -:  337:    }
+        -:  338:
+function _ZN5Snake4growEv called 3 returned 100% blocks executed 100%
+        3:  339:    void grow() { growing = true; }
+        -:  340:
+function _ZNK5Snake18checkSelfCollisionEv called 2 returned 100% blocks executed 100%
+        2:  341:    bool checkSelfCollision() const {
+        2:  342:        Position h = getHead();
+call    0 returned 2
+        7:  343:        for (size_t i = 1; i < body.size(); ++i)
+call    0 returned 7
+branch  1 taken 6 (fallthrough)
+branch  2 taken 1
+        6:  344:            if (h == body[i]) return true;
+call    0 returned 6
+call    1 returned 6
+branch  2 taken 1 (fallthrough)
+branch  3 taken 5
+        1:  345:        return false;
+        -:  346:    }
+        -:  347:
+        -:  348:    bool checkOtherCollision(const deque<Position>& otherBody) const {
+        -:  349:        Position h = getHead();
+        -:  350:        for (const auto& p : otherBody)
+        -:  351:            if (h == p) return true;
+        -:  352:        return false;
+        -:  353:    }
+        -:  354:};
+        -:  355:
+        -:  356:void Food::spawn(int maxX, int maxY, const vector<Snake*>& snakes) {
+        -:  357:    bool valid = false;
+        -:  358:    while (!valid) {
+        -:  359:        pos.x = rand() % (maxX - 2) + 1;
+        -:  360:        pos.y = rand() % (maxY - 2) + 1;
+        -:  361:        valid = true;
+        -:  362:        for (const auto &s : snakes) {
+        -:  363:            for (const auto &bodyPart : s->getBody()) {
+        -:  364:                if (pos == bodyPart) { valid = false; break; }
+        -:  365:            }
+        -:  366:            if (!valid) break;
+        -:  367:        }
+        -:  368:    }
+        -:  369:}
+        -:  370:
+function _ZN9GameBoardD1Ev called 1 returned 100% blocks executed 100%
+        1:  371:class GameBoard {
+call    0 returned 1
+        -:  372:private:
+        -:  373:    int width, height;
+        -:  374:    vector<vector<string>> grid;
+        -:  375:public:
+function _ZN9GameBoardC1Eii called 1 returned 100% blocks executed 64%
+        1:  376:    GameBoard(int w, int h) : width(w), height(h) {
+call    0 returned 1
+call    1 never executed
+        1:  377:        grid.assign(height, vector<string>(width, EMPTY_CELL));
+call    0 returned 1
+call    1 returned 1
+branch  2 taken 1 (fallthrough)
+branch  3 taken 0 (throw)
+call    4 returned 1
+branch  5 taken 1 (fallthrough)
+branch  6 taken 0 (throw)
+call    7 returned 1
+call    8 returned 1
+call    9 never executed
+call   10 never executed
+        1:  378:        clear();
+call    0 returned 1
+branch  1 taken 1 (fallthrough)
+branch  2 taken 0 (throw)
+        1:  379:    }
+        -:  380:    int getWidth() const { return width; }
+        -:  381:    int getHeight() const { return height; }
+        -:  382:
+function _ZN9GameBoard5clearEv called 1 returned 100% blocks executed 100%
+        1:  383:    void clear() {
+       11:  384:        for (int y = 0; y < height; ++y)
+branch  0 taken 10 (fallthrough)
+branch  1 taken 1
+      130:  385:            for (int x = 0; x < width; ++x)
+branch  0 taken 120 (fallthrough)
+branch  1 taken 10
+      228:  386:                grid[y][x] = (y == 0 || y == height-1 || x == 0 || x == width-1)
+branch  0 taken 96 (fallthrough)
+branch  1 taken 12
+branch  2 taken 88 (fallthrough)
+branch  3 taken 8
+branch  4 taken 8 (fallthrough)
+branch  5 taken 80
+call    6 returned 120
+call    7 returned 120
+      280:  387:                              ? BORDER_CELL : EMPTY_CELL;
+branch  0 taken 108 (fallthrough)
+branch  1 taken 12
+call    2 returned 120
+        1:  388:    }
+        -:  389:
+        -:  390:    void place(int x, int y, const string &sym) {
+        -:  391:        if (x >= 0 && x < width && y >= 0 && y < height)
+        -:  392:            grid[y][x] = sym;
+        -:  393:    }
+        -:  394:
+function _ZNK9GameBoard18isInsideBoundariesERK8Position called 6 returned 100% blocks executed 100%
+        6:  395:    bool isInsideBoundaries(const Position& p) const {
+        6:  396:        return p.x > 0 && p.x < width - 1 && p.y > 0 && p.y < height - 1;
+branch  0 taken 5 (fallthrough)
+branch  1 taken 1
+branch  2 taken 4 (fallthrough)
+branch  3 taken 1
+branch  4 taken 3 (fallthrough)
+branch  5 taken 1
+branch  6 taken 2 (fallthrough)
+branch  7 taken 1
+        -:  397:    }
+        -:  398:
+        -:  399:    // New render: build whole frame into stringstream and print once
+        -:  400:    void render(Terminal& term, int score, int highScore, int prevScore) const {
+        -:  401:        // Move cursor to top-left once and overwrite
+        -:  402:        term.moveCursor(1, 1);
+        -:  403:
+        -:  404:        ostringstream out;
+        -:  405:        out << CYAN << "SNAKE GAME  " << RESET
+        -:  406:            << " | Score: " << GREEN << score << RESET
+        -:  407:            << " | Prev: " << YELLOW << prevScore << RESET
+        -:  408:            << " | High: " << GREEN << highScore << RESET << "\n";
+        -:  409:        out << "Controls: P1: ARROW KEYS | P2: W/A/S/D | Q = Quit | P = Pause/Resume\n";
+        -:  410:
+        -:  411:        // Build the board rows
+        -:  412:        for (int y = 0; y < height; ++y) {
+        -:  413:            for (int x = 0; x < width; ++x) {
+        -:  414:                const string &cell = grid[y][x];
+        -:  415:                // Choose colored representation inline
+        -:  416:                if (cell == EMOJI_FOOD) out << RED << cell << RESET;
+        -:  417:                else if (cell == EMOJI_SNAKE_HEAD) out << GREEN << cell << RESET;
+        -:  418:                else if (cell == EMOJI_SNAKE_BODY) out << GREEN << cell << RESET;
+        -:  419:                else if (cell == BORDER_CELL) out << YELLOW << cell << RESET;
+        -:  420:                else out << cell;
+        -:  421:            }
+        -:  422:            out << "\n";
+        -:  423:        }
+        -:  424:
+        -:  425:        // Print full frame once
+        -:  426:        cout << out.str() << flush;
+        -:  427:    }
+        -:  428:};
+        -:  429:
+        -:  430:class Game {
+        -:  431:private:
+        -:  432:    Terminal term;
+        -:  433:    GameBoard* board;
+        -:  434:    Snake* snake;
+        -:  435:    Food* food;
+        -:  436:    int score, highScore, previousScore;
+        -:  437:    bool gameOver, running, paused;
+        -:  438:    int speedMs, appleCount;
+        -:  439:    const int speedStep = 8, minSpeedMs = 30;
+        -:  440:    int losingPlayer;
+        -:  441:
+        -:  442:    void setupSnakesAndFood() {
+        -:  443:        snakes.resize(NUM_PLAYERS);
+        -:  444:        for (int i = 0; i < NUM_PLAYERS; ++i) {
+        -:  445:            int sy = board->getHeight() / 2;
+        -:  446:            int sx;
+        -:  447:            Direction dir = RIGHT;
+        -:  448:            if (NUM_PLAYERS == 1) {
+        -:  449:                sx = board->getWidth() / 2;
+        -:  450:            } else {
+        -:  451:                sx = (board->getWidth() * (i + 1)) / (NUM_PLAYERS + 1);
+        -:  452:                if (i == 1) dir = LEFT;
+        -:  453:            }
+        -:  454:            snakes[i] = new Snake(sx, sy, dir);
+        -:  455:        }
+        -:  456:        food = new Food();
+        -:  457:        food->spawn(board->getWidth(), board->getHeight(), snakes);
+        -:  458:    }
+        -:  459:
+        -:  460:public:
+        -:  461:    Game(int boardSize)
+        -:  462:        : score(0), highScore(0), previousScore(0),
+        -:  463:          gameOver(false), running(true), paused(false),
+        -:  464:          speedMs(140), appleCount(0), losingPlayer(0) {
+        -:  465:
+        -:  466:        term.hideCursor();
+        -:  467:        ScoreData loaded = loadScores();
+        -:  468:        previousScore = loaded.previousScore;
+        -:  469:        highScore = loaded.highScore;
+        -:  470:
+        -:  471:        board = new GameBoard(boardSize, boardSize);
+        -:  472:        int sx = boardSize / 2, sy = boardSize / 2;
+        -:  473:        snake = new Snake(sx, sy);
+        -:  474:        food = new Food();
+        -:  475:        food->spawn(board->getWidth(), board->getHeight(), snake->getBody());
+        -:  476:    }
+        -:  477:
+        -:  478:    ~Game() {
+        -:  479:        delete board;
+        -:  480:        delete snake;
+        -:  481:        delete food;
+        -:  482:        term.showCursor();
+        -:  483:    }
+        -:  484:
+        -:  485:    void handleInput() {
+        -:  486:        if (!term.kbhit()) return;
+        -:  487:        char k = term.getch();
+        -:  488:        if (k == 0) return;
+        -:  489:
+        -:  490:        if (k == 27) {
+        -:  491:            if (term.kbhit()) {
+        -:  492:                char b1 = term.getch();
+        -:  493:                if (b1 == '[' && term.kbhit()) {
+        -:  494:                    char b2 = term.getch();
+        -:  495:                    if (b2 == 'A') snake->setDirection(UP);
+        -:  496:                    else if (b2 == 'B') snake->setDirection(DOWN);
+        -:  497:                    else if (b2 == 'C') snake->setDirection(RIGHT);
+        -:  498:                    else if (b2 == 'D') snake->setDirection(LEFT);
+        -:  499:                }
+        -:  500:            }
+        -:  501:        } else {
+        -:  502:            k = toupper(k);
+        -:  503:            if (k == 'W') snake->setDirection(UP);
+        -:  504:            else if (k == 'S') snake->setDirection(DOWN);
+        -:  505:            else if (k == 'A') snake->setDirection(LEFT);
+        -:  506:            else if (k == 'D') snake->setDirection(RIGHT);
+        -:  507:            else if (k == 'Q') running = false;
+        -:  508:            else if (k == 'P') togglePause();
+        -:  509:        }
+        -:  510:    }
+        -:  511:
+        -:  512:    void togglePause() {
+        -:  513:        paused = !paused;
+        -:  514:        if (paused) {
+        -:  515:            showPauseScreen();
+        -:  516:        }
+        -:  517:    }
+        -:  518:
+        -:  519:    void showPauseScreen() {
+        -:  520:        // 🧹 Clear bottom section and print pause message
+        -:  521:        term.moveCursor(1, board->getHeight() + 6);
+        -:  522:        cout << "\n" << YELLOW
+        -:  523:             << "\t=============================\n"
+        -:  524:             << "\t       GAME PAUSED\n"
+        -:  525:             << "\t=============================\n"
+        -:  526:             << "\t Press P to Resume\n"
+        -:  527:             << RESET << flush;
+        -:  528:
+        -:  529:        // Wait until user presses P again
+        -:  530:        while (paused && running) {
+        -:  531:            if (term.kbhit()) {
+        -:  532:                char k = toupper(term.getch());
+        -:  533:                if (k == 'P') {
+        -:  534:                    paused = false;
+        -:  535:                    term.clearScreen();
+        -:  536:                    render(); // redraw fresh frame after resume
+        -:  537:                    return;
+        -:  538:                } else if (k == 'Q') {
+        -:  539:                    running = false;
+        -:  540:                    return;
+        -:  541:                }
+        -:  542:            }
+        -:  543:            term.sleep(100);
+        -:  544:        }
+        -:  545:    }
+        -:  546:
+        -:  547:    void update() {
+        -:  548:        snake->move();
+        -:  549:        Position head = snake->getHead();
+        -:  550:
+        -:  551:        if (!board->isInsideBoundaries(head) || snake->checkSelfCollision()) {
+        -:  552:            gameOver = true;
+        -:  553:            return;
+        -:  554:        }
+        -:  555:
+        -:  556:        if (head == food->getPosition()) {
+        -:  557:            snake->grow();
+        -:  558:            score++;
+        -:  559:            appleCount++;
+        -:  560:            if (appleCount >= 4) {
+        -:  561:                speedMs = max(minSpeedMs, speedMs - speedStep);
+        -:  562:                appleCount = 0;
+        -:  563:            }
+        -:  564:            if (score > highScore) highScore = score;
+        -:  565:            food->spawn(board->getWidth(), board->getHeight(), snake->getBody());
+        -:  566:        }
+        -:  567:    }
+        -:  568:
+        -:  569:    void render() {
+        -:  570:        board->clear();
+        -:  571:        Position fpos = food->getPosition();
+        -:  572:        board->place(fpos.x, fpos.y, food->getSymbol());
+        -:  573:        const deque<Position>& body = snake->getBody();
+        -:  574:        for (size_t i = 0; i < body.size(); ++i)
+        -:  575:            board->place(body[i].x, body[i].y,
+        -:  576:                         (i == 0) ? snake->getHeadSymbol() : snake->getBodySymbol());
+        -:  577:        board->render(term, score, highScore, previousScore);
+        -:  578:    }
+        -:  579:
+        -:  580:    void showGameOver() {
+        -:  581:        previousScore = score;
+        -:  582:        if (score > highScore) highScore = score;
+        -:  583:        saveScores({ previousScore, highScore });
+        -:  584:
+        -:  585:        term.clearScreen();
+        -:  586:        term.moveCursor(1, 1);
+        -:  587:
+        -:  588:        cout << "\n\n\t ================================\n";
+        -:  589:        cout << "\t         GAME OVER!\n";
+        -:  590:        cout << "\t ================================\n\n";
+        -:  591:        cout << "\t   Final Score: " << score << "\n";
+        -:  592:        cout << "\t   High Score: " << highScore << "\n";
+        -:  593:        cout << "\t   Previous Score: " << previousScore << "\n";
+        -:  594:        cout << "\n\t ================================\n\n";
+        -:  595:        cout << "\t Press R to Restart, Q to Quit\n\n" << flush;
+        -:  596:
+        -:  597:        while (true) {
+        -:  598:            if (term.kbhit()) {
+        -:  599:                char k = toupper(term.getch());
+        -:  600:                if (k == 'R') {
+        -:  601:                    term.clearScreen();
+        -:  602:                    restart();
+        -:  603:                    return;
+        -:  604:                } else if (k == 'Q') {
+        -:  605:                    term.clearScreen();
+        -:  606:                    running = false;
+        -:  607:                    return;
+        -:  608:                }
+        -:  609:            }
+        -:  610:            term.sleep(50);
+        -:  611:        }
+        -:  612:    }
+        -:  613:
+        -:  614:    void restart() {
+        -:  615:        delete snake;
+        -:  616:        delete food;
+        -:  617:        score = 0;
+        -:  618:        gameOver = false;
+        -:  619:        paused = false;
+        -:  620:        speedMs = 140;
+        -:  621:        appleCount = 0;
+        -:  622:
+        -:  623:        int sx = board->getWidth() / 2, sy = board->getHeight() / 2;
+        -:  624:        snake = new Snake(sx, sy);
+        -:  625:        food = new Food();
+        -:  626:        food->spawn(board->getWidth(), board->getHeight(), snake->getBody());
+        -:  627:
+        -:  628:        term.clearScreen();
+        -:  629:        term.moveCursor(1, 1);
+        -:  630:    }
+        -:  631:
+        -:  632:    void run() {
+        -:  633:        render();
+        -:  634:        while (running) {
+        -:  635:            if (gameOver) {
+        -:  636:                showGameOver();
+        -:  637:            } else if (!paused) {
+        -:  638:                handleInput();
+        -:  639:                update();
+        -:  640:                render();
+        -:  641:                term.sleep(speedMs);
+        -:  642:            } else {
+        -:  643:                // still handle pause input while paused
+        -:  644:                handleInput();
+        -:  645:                term.sleep(100);
+        -:  646:            }
+        -:  647:        }
+        -:  648:    }
+        -:  649:};
+        -:  650:
+        -:  651:
+        -:  652:
+        -:  653:// ======================================================
+        -:  654:// MAIN
+        -:  655:// ======================================================
+        -:  656:int main() {
+        -:  657:    srand((unsigned)time(0));
+        -:  658:    Terminal term;
+        -:  659:
+        -:  660:    int consoleW, consoleH;
+        -:  661:    term.getSize(consoleW, consoleH);
+        -:  662:
+        -:  663:    int gameSize = min((consoleW - 2) / 2, consoleH - 6);
+        -:  664:    if (gameSize < 10) gameSize = 10;
+        -:  665:
+        -:  666:    term.clearScreen();
+        -:  667:    term.hideCursor();
+        -:  668:
+        -:  669:#ifdef _WIN32
+        -:  670:    cout << "[Windows mode detected — ASCII graphics]\n\n";
+        -:  671:#else
+        -:  672:    cout << "[Unix mode detected — Emoji graphics]\n\n";
+        -:  673:#endif
+        -:  674:
+        -:  675:    cout << "===================================\n";
+        -:  676:    cout << "       WELCOME TO SNAKE GAME\n";
+        -:  677:    cout << "===================================\n\n";
+        -:  678:    cout << "Saved High Score: " << loadScores().highScore << "\n\n";
+        -:  679:    cout << "Instructions:\n";
+        -:  680:    cout << "  - Use W/A/S/D or ARROW KEYS to control the snake\n";
+        -:  681:    cout << "  - Eat " << EMOJI_FOOD << " to grow and score\n";
+        -:  682:    cout << "  - Speed increases after every 4 apples eaten\n";
+        -:  683:    cout << "  - Avoid walls and yourself\n";
+        -:  684:    cout << "  - Press Q to quit anytime\n\n";
+        -:  685:    cout << "  - Press P to Pause/Resume anytime\n\n";
+        -:  686:    cout << "Press any key to start...\n";
+        -:  687:
+        -:  688:    while (!term.kbhit()) term.sleep(50);
+        -:  689:    term.getch();
+        -:  690:
+        -:  691:    Game game(gameSize);
+        -:  692:    game.run();
+        -:  693:
+        -:  694:    term.clearScreen();
+        -:  695:    term.showCursor();
+        -:  696:    cout << "\nThank you for playing! Your scores are saved to scores.txt\n";
+        -:  697:    return 0;
+        -:  698:}

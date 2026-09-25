@@ -1,0 +1,10 @@
+PASS eating increments score exactly once
+PASS eating grows by one on following move
+PASS no food preserves progress and length
+PASS new record updates high score
+PASS existing high score survives eating
+PASS fourth apple reduces delay and resets counter
+PASS earlier apple does not reduce delay
+PASS delay never falls below 30 ms
+PASS wall collision ends game before scoring
+PASS self collision ends game before scoring

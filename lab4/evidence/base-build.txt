@@ -1,0 +1,10 @@
+work/SnakeX/code/game.cpp:356:6: error: prototype for 'void Food::spawn(int, int, const std::vector<Snake*>&)' does not match any in class 'Food'
+ void Food::spawn(int maxX, int maxY, const vector<Snake*>& snakes) {
+      ^~~~
+work/SnakeX/code/game.cpp:287:10: error: candidate is: void Food::spawn(int, int, const std::deque<Position>&)
+     void spawn(int maxX, int maxY, const deque<Position>& snakeBody) {
+          ^~~~~
+work/SnakeX/code/game.cpp: In member function 'void Game::setupSnakesAndFood()':
+work/SnakeX/code/game.cpp:443:9: error: 'snakes' was not declared in this scope
+         snakes.resize(NUM_PLAYERS);
+         ^~~~~~

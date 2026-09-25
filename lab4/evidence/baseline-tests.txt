@@ -1,0 +1,5 @@
+PASS initial snake has three cells
+PASS movement continues and rejects reversal
+PASS food samples avoid occupied cells
+PASS boundary predicate recognizes walls
+PASS self collision predicate recognizes loop
